@@ -1,0 +1,317 @@
+---
+title: "Practical Machine Learning"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE, fig=TRUE, fig.align='center', fig.width=4, fig.height=4, warnings=FALSE, errors=TRUE, fig=TRUE, message=FALSE, echo=FALSE, results='show', cache.path = 'project_week3_cache/', fig.path='project_week3_figure/')
+
+```
+
+*Analysis by kateetak - Performed on 22th of January 2015*
+
+###Synopsis - Summary
+The analysis studies different models based on the data provided by the project and select the best one to be applied to the test data to calculate its acccuracy.
+
+The selected model is a tree forest model applied to reduced set of features highlighted to be the important features for the data.
+
+The accuracy level of the model applied to the test data is close to 1.
+
+```{r libraries_loading}
+# Loading the required libraries to perform the analysis
+
+# Train function requires caret library
+library(caret)
+# Tree prediction requires rpart library
+library(rpart)
+```
+
+```{r setseed}
+# Setting the seed to obtain the same results at every run
+set.seed(70881)
+```
+
+```{r data_loading}
+# blank spaces are transformed into NA for an easier cleaning of the data
+sourcetraining <- read.csv(".\\project_data\\pml-training.csv", header = TRUE, stringsAsFactors=TRUE, na.strings=c("NA",""))
+
+training <- sourcetraining
+
+testing <- read.csv(".\\project_data\\pml-testing.csv", header = TRUE, stringsAsFactors=TRUE)
+
+```
+
+###Exploratory data analysis
+After loading the data a basic exploratory data analysis is performed to understand the distribution of the classes on the training data set. The results in the table below show that 28% of the observations are of class A, while the remaining data are almost evenly distributed across the remaining classes. 
+```{r dataanalysis, cache=TRUE}
+freq <- as.data.frame(round(table(training$classe)/dim(training)[1], 2))
+names(freq) <- c("Classe", "Frequency")
+print(freq, row.names = FALSE)
+```
+
+###Cleaning the data
+The dataset is big and the original number of features is equal to 160. Therefor some additional analysis has been performed to reduce the number of features to the ones required and significant for the model.
+In particular:
+
+- 43 near zero values columns are excluded and will reduce the dataset to 117 variables;
+- 58 columns are excluded because they mainly contain NA values. It has been calculated that the columns with at least one NA value all contain 19216 NAs out of 19622 observation, this means that .98 of each observation in that columns are NAs. By removing these columns the dataset only contains 59 features (including the classe column).
+- the first 6 columns, containing descriptive values, are not relevant for the analysis and are therefore removed. These columns are the id of the observation, the user_name, the timestamps and the num_window.
+
+```{r datacleaning, cache=TRUE}
+#### NearZeroValues
+
+# the nzvcolumns are calculated using the nearZeroVar function
+nzvcolumn <- nearZeroVar(training, saveMetrics=TRUE)
+
+# 43 columns have a nzv are removed
+# removing the nzv columns
+training <- training[,!nzvcolumn$nzv]
+
+# this would return the nzv columns
+#names(sourcetraining)[nzvcolumn$nzv]
+
+
+
+#### NAs
+
+# only 59 columns contain 0 NA, the remaining 100 columns all contain the same number (19216) of NA
+nacount <- sapply(training, function(x) sum(is.na(x)))
+
+# the following code shows how to count the columns without any NA (where the total of NA is 0)
+# sum(nacount == 0)
+
+# viewing the nacount array will show that each column contains either 0 or 19216/19622 = .98 of NAs
+# View(nacount)
+
+# the columns containing mainly NAs are removed
+training <- training[,!nacount]
+
+
+#### Descriptive columns
+
+# training columns containing the id of the observation, the user_name, the timestamps and the date are removed. These are columns 1 to 6.
+
+training <- training[,c(-6:-1)]
+```
+
+The following list shows the list of the 52 features used for the models below.
+```{r selectedFeatures, cache=TRUE, echo=FALSE}
+names(training)
+
+```
+The last feature in the list (classe) is the value to be predicted.
+
+###Practical Machine Learning
+
+####Data Partition
+The data are partitioned using a *p=0.3* value, this will result in a training set smaller than the testing set (this is not the standard rule to be applied when performing a data partition but will allow a reasonable processing time).
+
+```{r DataPartition, cache=TRUE, echo=FALSE}
+
+inTrain <- createDataPartition(training$classe, p=0.3, list = FALSE)
+train <- training[inTrain,]
+test <- training[-inTrain,]
+```
+
+The size of the training and test set is:
+
+```{r sizeDataPartition, cache=TRUE}
+
+setdim <- as.data.frame(
+                    cbind(dim(train)[[1]], dim(test)[[1]]))
+names(setdim) <- c("training", "testing")
+
+print(setdim, row.names = FALSE)
+```
+
+###Model fitting
+
+####First model - tree prediction
+
+The first model analyzed uses a tree prediction through the rpart method.
+```{r treeTrain, cache=TRUE, echo=FALSE}
+tmodFit <- train(classe~., data=train, method="rpart")
+```
+
+However the confusion matrix for this model shows a very low *accuracy equal to only 0.582*.
+Even if this model has the advantage to be fast in the processing compared to the others (even on bigger training partitions), the values predicted are not accurate so further models are evaluated.
+
+```{r treePredict, cache=TRUE}
+tpredict <- predict(tmodFit, train)
+
+# the following code could be used to print the finalModel
+# print(tmodFit$finalModel)
+
+# retrieve the confusion matrix on the train data to calculate the accuracy
+# and use it in the figure
+tmatrix <- confusionMatrix(tpredict, train$classe)
+```
+
+
+####Second model - Random forest prediction
+A random forest model is tested and the accuracy is very high.
+However this model takes a long time to process, with the selected training set with p=0.3 at least 15 minutes are required to retrieve it.
+```{r rfTrain, cache=TRUE, echo=FALSE}
+# retrieve the random forest model
+rfmodFit <- train(classe~., data=train, method="rf")
+```
+
+
+```{r rfPredict, cache=TRUE}
+# predict the observation on the train data for the random forest model
+rfpredict <- predict(rfmodFit, train)
+
+# the following code could be used to print the finalModel
+# print(rfmodFit$finalModel)
+
+# retrieve the confusion matrix on the train data to calculate the accuracy
+# and use it in the figure
+rfmatrix <- confusionMatrix(rfpredict, train$classe)
+```
+
+####Third model - Random forest prediction with Top20 features
+A further model fitting is performed to check if it is possible to achieve good performances in the model calculation with a standard approach in the data partition between training and test data.
+
+The approach selected is to reduce the number of features selected to the ones that are move important. This is achieved by using the **varImp ** function.
+
+The following plot shows the importance of the variables on the Random forest model.
+
+```{r impVarPlot, cache=TRUE, fig.height=8}
+
+impvar <- varImp(rfmodFit, scale = TRUE)
+
+plot(impvar, color="lightblue", main="Variable importance")
+```
+
+The following table shows the Top20 features selected and their importance value, these are the only features used to obtain the third model.
+
+```{r impvarSelection, cache=TRUE}
+# retrieve the importance value
+impvar <- impvar$importance
+
+# select the columns and add a column name for each column
+impvar <- cbind(Row.Names = rownames(impvar), impvar)
+rownames(impvar) <- NULL
+names(impvar) <- c("feature", "value")
+
+# select the Top20 features
+impvar <- impvar[order(impvar$value, decreasing=TRUE)[1:20],] 
+
+# display the Top20 features
+print(impvar)
+```
+
+
+```{r impVarDataPartition, cache=TRUE}
+# retrieve the list of features to be used for the selection in the data
+# this is the Top20 list of features and the classe column (the value to be predicted)
+features <- c(as.character(impvar$feature), "classe")
+
+# subset the training data set on the features list
+training <- training[,features]
+
+# partition the data for the third model
+inTrainIV <- createDataPartition(training$classe, p=0.7, list = FALSE)
+trainIV <- training[inTrainIV,]
+testIV <- training[-inTrainIV,]
+```
+
+The data are partitioned using a *p=0.7* value (which is the recommended value).
+
+The dimension of the resulting training and test data is the following:
+```{r sizeDataPartitionIV, cache=TRUE}
+setdimIV <- as.data.frame(
+                    cbind(dim(trainIV)[[1]], dim(testIV)[[1]]))
+names(setdimIV) <- c("training", "testing")
+print(setdimIV, row.names = FALSE)
+```
+
+
+
+```{r rfIVTrain, cache=TRUE, echo=FALSE}
+# retrieve the random forest model with the reduced set of features
+rfIVmodFit <- train(classe~., data=trainIV, method="rf")
+```
+
+
+
+```{r rfIVPredict, cache=TRUE}
+# predict the observation on the train data for the random forest model (with Top20 features)
+rfIVpredict <- predict(rfIVmodFit, trainIV)
+
+# the following code could be used to print the finalModel
+# print(rfIVpredict$finalModel)
+
+# retrieve the confusion matrix on the train data to calculate the accuracy
+# and use it in the figure
+rfIVmatrix <- confusionMatrix(rfIVpredict, trainIV$classe)
+```
+
+
+
+####Model comparison
+The following figure shows a comparison between the **confusion matrix** for the Tree model and the Random forest model:
+```{r confusionMatrixPlot, fig.width=14, cache=TRUE}
+par(mfrow=c(1,3))
+
+plot(tmatrix[[2]], color="lightblue", main="Tree model")
+
+plot(rfmatrix[[2]], color="lightblue", main="Random forest model")
+
+plot(rfIVmatrix[[2]], color="lightblue", main="Random forest model - Top20 features") 
+
+# reset the par attributes to the default values
+par(mfrow=c(1,1))
+
+```
+From the picture it is visible that the predicted values and the observed one on the training set match in the Random forest model (on the right), while they are often different in the Tree model (on the left).
+
+The value of the **accuracy** of the models on the training data is shown in the following table:
+```{r}
+accuracy <- as.data.frame(
+              rbind(tmatrix$overall[1],
+                    rfmatrix$overall[1],
+                    rfIVmatrix$overall[1]))
+accuracy <- cbind(
+                  rbind("Tree model",
+                        "Random forest model",
+                        "Random forest model - Top20"),
+                  accuracy)
+
+names(accuracy) <- c("Model", "Accuracy")
+
+print(accuracy, row.names = FALSE)
+```
+The accuracy of the two 
+
+####Model selection
+The **Random forest model - Top20** is selected because it meets the accuracy criteria, the speed to compute it is fast enough and it can be calculated on a bigger amount (70%) of the available data.
+
+###Cross validation
+The cross validation has been performed by predicting the values in the test set with the selected model and comparing them with the observed values.
+
+```{r prediction, cache=TRUE}
+prfIVtest <- predict(rfIVmodFit, testIV) 
+rfIVmatrixTest <- confusionMatrix(prfIVtest, testIV$classe)
+```
+
+The accuracy on the test set is high confirming the accuracy of the model:
+```{r rfmatrixTes, cache=TRUE}
+rfIVmatrixTest$overall[1]
+```
+
+###Appendix
+####Prediction on the course project submission
+The following shows the predicted values and their probability on the testing data using the selected model:
+```{r predictionProbability, cache=TRUE}
+rfIVpredict <- cbind(predict(rfIVmodFit, testing, type="raw"),
+                   predict(rfIVmodFit, testing, type="prob"))
+names(rfIVpredict) <- c("Value", "%A", "%B", "%C", "%D", "%E")
+rfIVpredict
+
+```
+***Note:*** this is the prediction on the course project submission
